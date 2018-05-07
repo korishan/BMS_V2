@@ -44,6 +44,7 @@ class bq769x0 {
 
     // initialization, status update and shutdown
     bq769x0(byte bqType = bq76920, int bqI2CAddress = 0x18);
+    bq769x0(I2C& bqI2C, byte alertPin, int bqType = bq76930, int bqI2CAddress = 0x08, bool crc = true);
     int begin(byte alertPin, byte bootPin = -1);
     int checkStatus();  // returns 0 if everything is OK
     void update(void);

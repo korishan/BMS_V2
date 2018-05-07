@@ -30,7 +30,6 @@
 
 #include "bq769x0.h"
 #include "registers.h"
-#include "I2C.h"
 
 // for the ISR to know the bq769x0 instance
 bq769x0* bq769x0::instancePointer = 0;
@@ -78,6 +77,16 @@ uint8_t _crc8_ccitt_update (uint8_t inCrc, uint8_t inData)
 //----------------------------------------------------------------------------
 bq769x0::bq769x0(byte bqType, int bqI2CAddress)
 {
+  _timer.start();
+
+  // set some safe default values
+  autoBalancingEnabled = false;
+  balancingMinIdleTime_s = 1800;    // default: 30 minutes
+  idleCurrentThreshold = 30; // mA
+
+  thermistorBetaValue = 3435;  // typical value for Semitec 103AT-5 thermistor
+
+  alertInterruptFlag = true;   // init with true to check and clear errors at start-up
   type = bqType;
   I2CAddress = bqI2CAddress;
 
@@ -96,6 +105,57 @@ bq769x0::bq769x0(byte bqType, int bqI2CAddress)
     numberOfCells = MAX_NUMBER_OF_CELLS;
   }
 }
+
+//bq769x0::bq769x0(I2C& bqI2C, byte alertPin, int bqType, int bqI2CAddress, bool crc):
+//    _i2c(bqI2C), _alertInterrupt(alertPin)
+//{
+//    _timer.start();
+//    _alertInterrupt.rise(callback(this, &bq769x0::setAlertInterruptFlag));
+//
+//    // set some safe default values
+//    autoBalancingEnabled = false;
+//    balancingMinIdleTime_s = 1800;    // default: 30 minutes
+//    idleCurrentThreshold = 30; // mA
+//
+//    thermistorBetaValue = 3435;  // typical value for Semitec 103AT-5 thermistor
+//
+//    alertInterruptFlag = true;   // init with true to check and clear errors at start-up
+//
+//    type = bqType;
+//    if (type == bq76920) {
+//        numberOfCells = 5;
+//    } else if (type == bq76930) {
+//        numberOfCells = 10;
+//    } else {
+//        numberOfCells = 15;
+//    }
+//
+//    // initialize variables
+//    for (int i = 0; i < numberOfCells - 1; i++) {
+//        cellVoltages[i] = 0;
+//    }
+//
+//    //crcEnabled = crc;
+//    //I2CAddress = bqI2CAddress;
+//
+//    if (determineAddressAndCrc())
+//    {
+//        // initial settings for bq769x0
+//        writeRegister(SYS_CTRL1, 0b00011000);  // switch external thermistor and ADC on
+//        writeRegister(SYS_CTRL2, 0b01000000);  // switch CC_EN on
+//
+//        // get ADC offset and gain
+//        adcOffset = (signed int) readRegister(ADCOFFSET);  // convert from 2's complement
+//        adcGain = 365 + (((readRegister(ADCGAIN1) & 0b00001100) << 1) |
+//            ((readRegister(ADCGAIN2) & 0b11100000) >> 5)); // uV/LSB
+//    }
+//    else {
+//        // TODO: do something else... e.g. set error flag
+//#if BQ769X0_DEBUG
+//        printf("BMS communication error\n");
+//#endif
+//    }
+//}
 
 //-----------------------------------------------------------------------------
 int bq769x0::begin(byte alertPin, byte bootPin)
@@ -910,6 +970,60 @@ void bq769x0::updateTemperatures()
     }
   }
   }*/
+//void bq769x0::updateVoltages()
+//{
+//  long adcVal = 0;
+//  char buf[4];
+//  int connectedCellsTemp = 0;
+//
+//  uint8_t crc;
+//
+//  // read battery pack voltage
+//  adcVal = (readRegister(BAT_HI_BYTE) << 8) | readRegister(BAT_LO_BYTE);
+//  batVoltage = 4.0 * adcGain * adcVal / 1000.0 + 4 * adcOffset;
+//
+//  // read cell voltages
+//  buf[0] = (char) VC1_HI_BYTE;
+//  _i2c.write(I2CAddress << 1, buf, 1);;
+//
+//  idCellMaxVoltage = 0;
+//  idCellMinVoltage = 0;
+//  for (int i = 0; i < numberOfCells; i++)
+//  {
+//    if (crcEnabled == true) {
+//      _i2c.read(I2CAddress << 1, buf, 4);
+//      adcVal = (buf[0] & 0b00111111) << 8 | buf[2];
+//
+//      // CRC of first bytes includes slave address (including R/W bit) and data
+//      crc = _crc8_ccitt_update(0, (I2CAddress << 1) | 1);
+//      crc = _crc8_ccitt_update(crc, buf[0]);
+//      if (crc != buf[1]) return; // don't save corrupted value
+//
+//      // CRC of subsequent bytes contain only data
+//      crc = _crc8_ccitt_update(0, buf[2]);
+//      if (crc != buf[3]) return; // don't save corrupted value
+//    }
+//    else {
+//      _i2c.read(I2CAddress << 1, buf, 2);
+//      adcVal = (buf[0] & 0b00111111) << 8 | buf[1];
+//    }
+//
+//    cellVoltages[i] = adcVal * adcGain / 1000 + adcOffset;
+//
+//    if (cellVoltages[i] > 500) {
+//      connectedCellsTemp++;
+//    }
+//
+//    if (cellVoltages[i] > cellVoltages[idCellMaxVoltage]) {
+//      idCellMaxVoltage = i;
+//    }
+//    if (cellVoltages[i] < cellVoltages[idCellMinVoltage] && cellVoltages[i] > 500) {
+//      idCellMinVoltage = i;
+//    }
+//  }
+//  connectedCells = connectedCellsTemp;
+//}
+
 void bq769x0::updateVoltages()
 {
   long adcVal = 0;
@@ -917,10 +1031,6 @@ void bq769x0::updateVoltages()
   int connectedCellsTemp = 0;
 
   uint8_t crc;
-
-  // read battery pack voltage
-  adcVal = (readRegister(BAT_HI_BYTE) << 8) | readRegister(BAT_LO_BYTE);
-  batVoltage = 4.0 * adcGain * adcVal / 1000.0 + 4 * adcOffset;
 
   // read cell voltages
   buf[0] = (char) VC1_HI_BYTE;
@@ -962,6 +1072,10 @@ void bq769x0::updateVoltages()
     }
   }
   connectedCells = connectedCellsTemp;
+
+  // read battery pack voltage
+  adcVal = (readRegister(BAT_HI_BYTE) << 8) | readRegister(BAT_LO_BYTE);
+  batVoltage = 4.0 * adcGain * adcVal / 1000.0 + connectedCells * adcOffset;
 }
 
 // SOC calculation based on average cell open circuit voltage

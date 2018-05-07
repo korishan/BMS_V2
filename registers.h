@@ -1,6 +1,6 @@
 /*
     registers.h - Battery management system based on bq769x0 for Arduino
-    Copyright (C) 2015  Martin Jäger (m.jaeger@posteo.de)
+    Copyright (C) 2015  Martin Jï¿½ger (m.jaeger@posteo.de)
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as 
