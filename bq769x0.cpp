@@ -75,7 +75,8 @@ uint8_t _crc8_ccitt_update (uint8_t inCrc, uint8_t inData)
 }
 
 //----------------------------------------------------------------------------
-bq769x0::bq769x0(byte bqType, int bqI2CAddress)
+//bq769x0::bq769x0(byte bqType, int bqI2CAddress)
+bq769x0::bq769x0(I2C& bqI2C, byte bqType, int bqI2CAddress):_i2c(bqI2C)
 {
   _timer.start();
 
